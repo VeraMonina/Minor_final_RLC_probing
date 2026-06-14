@@ -26,7 +26,6 @@ import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModel
 
-use_dapt = True         # если True, ищем дообученные DAPT-модели в папке models/
 num_layers = 13         # слои: 0 = эмбеддинговый, 1..12 = трансформерные блоки
 flush_every = 500       # сбрасываем на диск каждые 500 предложений (меньше = меньше RAM, но больше файлов)
 

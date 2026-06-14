@@ -9,8 +9,8 @@ Original file is located at
 
 """
 dataset_analysis.py
-Full EDA for the RLC probing study dataset.
-
+Полный разведочный анализ (EDA) датасета для изучения русского как иностранного.
+Здесь мы смотрим, как текст зависит от родного языка студента, его уровня и т.д.
 """
 
 import re
@@ -24,31 +24,17 @@ import seaborn as sns
 from pathlib import Path
 from scipy import stats
 
-plt.rcParams.update({
-    "figure.dpi":        150,
-    "font.family":       "DejaVu Sans",
-    "font.size":         10,
-    "axes.grid":         True,
-    "grid.alpha":        0.4,
-    "grid.linestyle":    "-",
-    "axes.labelsize":    11,
-    "axes.titlesize":    12,
-    "axes.titleweight":  "bold",
-    "legend.fontsize":   9,
-    "xtick.labelsize":   9,
-    "ytick.labelsize":   9,
-})
 
-# Groups based on morphological distance from Russian:
-#   isolating    — no case, no aspect (maximally distant)
-#   romance      — rich verb morphology, reduced nominal case
-#   germanic     — analytic, fixed word order
-#   agglutinative— case-like suffixes (partial analogical support for Russian case)
-#   slavic       — closely related, rich shared morphology
-#   semitic      — non-Indo-European, root-and-pattern morphology
+# Тут я вручную разбила языки по типологическим группам.
+#   изолирующие — совсем нет падежей, нет вида (китайский, тайский...)
+#   романские — богатая глагольная морфология, но слабая именная
+#   германские — аналитические, фиксированный порядок слов
+#   агглютинативные — суффиксы как падежи (корейский, финский...)
+#   славянские — ближайшие родственники, много общих черт
+#   семитские — не-ИЕ, корневая система (арабский)
 typology_robust = {
     "chinese":   "Isolating",
-    "japonese":  "Isolating",
+    "japonese":  "Isolating",   # да, опечатка в исходных данных, но пусть будет
     "thai":      "Isolating",
     "french":    "Romance",
     "italian":   "Romance",
@@ -61,7 +47,7 @@ typology_robust = {
     "finnish":   "Agglutinative",
     "hungarian": "Agglutinative",
     "kazah":     "Agglutinative",
-    "сzech":     "Slavic",
+    "сzech":     "Slavic",      
     "bulgarian": "Slavic",
     "arabic":    "Semitic",
     "pushtu":    "Indo-Iranian",
@@ -69,89 +55,92 @@ typology_robust = {
 }
 
 
-typ_colors = {
-    "Isolating":     "#4e79a7",
-    "Romance":       "#f28e2b",
-    "Germanic":      "#59a14f",
-    "Agglutinative": "#e15759",
-    "Slavic":        "#b07aa1",
-    "Semitic":       "#76b7b2",
-    "Indo-Iranian":  "#edc948",
-}
 
+# Уровни владения русским по порядку
 level_of_rus = ["A1", "A2", "B1", "B2", "C1"]
-hight_resource_thr = 50 # fewer that 50 lang --> low-resource based on our data
 
+# Порог для "высокоресурсных" языков: если в датасете меньше 50 текстов — считаем низкоресурсным
+high_resource_thr = 50
 
-# EDA; typology
 df = pd.read_csv("dataset_RLC_final_project.csv")
+
+# перестраховка
 df = df[df["text"].notna() & (df["text"].str.strip() != "")].copy()
+
+# Превращаем уровень владения в категориальную переменную с правильным порядком
 df["level_of_rus"] = pd.Categorical(
     df["level_of_rus"],
     categories=[l for l in level_of_rus if l in df["level_of_rus"].unique()],
     ordered=True,
 )
 
+# Определяем типологию для каждого студента по его родному языку
 df["typology"] = df["dominant_language"].map(typology_robust).fillna("Other")
 
-l1_counts     = df["dominant_language"].value_counts()
-high_resource = sorted(l1_counts[l1_counts >= hight_resource_thr].index.tolist())
-low_resource  = sorted(l1_counts[l1_counts <  hight_resource_thr].index.tolist())
-df["resource"]= df["dominant_language"].apply(
+# Смотрим, сколько текстов на каждом L1, делим на high/low resource
+l1_counts = df["dominant_language"].value_counts()
+high_resource = sorted(l1_counts[l1_counts >= high_resource_thr].index.tolist())
+low_resource  = sorted(l1_counts[l1_counts <  high_resource_thr].index.tolist())
+df["resource"] = df["dominant_language"].apply(
     lambda x: "high" if x in high_resource else "low"
 )
 
-# EDA; text characteristics
-def word_count(t):    return len(str(t).split())
+
+# Функции для подсчёта слов, лексического разнообразия и т.п.
+
+def word_count(t):
+    """Сколько слов в тексте (просто split по пробелам)."""
+    return len(str(t).split())
+
 def ttr(t):
+    """Type-Token Ratio: отношение уникальных слов к общему числу.
+    Чем выше — тем разнообразнее лексика."""
     tokens = str(t).lower().split()
     return len(set(tokens)) / len(tokens) if tokens else 0.0
+
 def avg_word_len(t):
+    """Средняя длина слова в символах (учитываем только буквы)."""
     words = [w for w in str(t).split() if w.isalpha()]
     return np.mean([len(w) for w in words]) if words else 0.0
-def sent_count(t):    return max(len(re.findall(r'[.!?]+', str(t))), 1)
-def avg_sent_len(t):  return word_count(t) / sent_count(t)
 
+def sent_count(t):
+    """Количество предложений — ищем точки, вопросительные и восклицательные знаки."""
+    return max(len(re.findall(r'[.!?]+', str(t))), 1)
+
+def avg_sent_len(t):
+    """Средняя длина предложения в словах."""
+    return word_count(t) / sent_count(t)
+
+# Применяем эти функции ко всему датасету
 df["word_count"]   = df["text"].apply(word_count)
 df["ttr"]          = df["text"].apply(ttr)
 df["avg_word_len"] = df["text"].apply(avg_word_len)
 df["sent_count"]   = df["text"].apply(sent_count)
 df["avg_sent_len"] = df["text"].apply(avg_sent_len)
 
-L1_ORDER = (df.groupby(["typology", "dominant_language"])
-              .size().reset_index(name="n")
-              .sort_values(["typology", "n"], ascending=[True, False])
-              ["dominant_language"].tolist())
 
-def l1_color(l1):
-    return typ_colors.get(typology_robust.get(l1, "Other"), "#aaaaaa")
-
-# printing basics of L1 statistics
 print(f"Total texts:      {len(df)}")
 print(f"Unique text_ids:  {df['text_id'].nunique()}")
 print(f"L1 groups:        {df['dominant_language'].nunique()}")
 print(f"Levels present:   {sorted(df['level_of_rus'].dropna().unique().tolist())}")
-print('\n\n\n')
 
-print("Texts per L1 (with typological group):")
-for l1 in L1_ORDER:
+print("\nTexts per L1 (with typological group):")
+for l1 in l1_order:
     n      = l1_counts.get(l1, 0)
     tag    = "high" if l1 in high_resource else "low "
     typo   = typology_robust.get(l1, "Other")
     share  = n / len(df) * 100
     print(f"  [{tag}]  {l1:12s}  {typo:15s}  n={n:4d}")
 
-
-print("L1 × Level matrix:")
+print("\nL1 × Level matrix:")
 print(df.groupby(["dominant_language", "level_of_rus"], observed=True)
       .size().unstack(fill_value=0).to_string())
 
-print("L1 × Background:")
+print("\nL1 × Background:")
 print(df.groupby(["dominant_language", "background"])
       .size().unstack(fill_value=0).to_string())
 
-# printing basics of text characteristics
-
+# Теперь смотрим на средние характеристики текстов
 metrics = ["word_count", "ttr", "avg_word_len", "avg_sent_len"]
 metric_labels = {
     "word_count":   "Word count",
@@ -167,7 +156,8 @@ print(df.groupby("level_of_rus", observed=True)[metrics].mean().round(3).to_stri
 print("\nMeans by typological group:")
 print(df.groupby("typology")[metrics].mean().round(3).to_string())
 
-# statistical tests by-level of competence, by-dominant language
+
+# Использую непараметрический Kruskal-Wallis, потому что распределения не нормальные
 print("\nKruskal-Wallis test — differences by L1:")
 for m in metrics:
     groups = [g[m].values for _, g in df.groupby("dominant_language")]
@@ -182,318 +172,15 @@ for m in metrics:
     sig = "significant" if p < 0.001 else ("**" if p < 0.01 else ("*" if p < 0.05 else "ns"))
     print(f"  {metric_labels[m]:40s}  H={H:7.2f}  p={p:.4f}  {sig}")
 
+print(f"\nHigh-resource languages: {high_resource}")
+print(f"Low-resource languages:  {low_resource}")
 
-print(f"  High-resource: {high_resource}")
-print(f"  Low-resource:  {low_resource}")
-
-for l1 in L1_ORDER:
+# Смотрим, насколько сильно внутри каждого L1 доминирует один уровень
+for l1 in l1_order:
     sub = df[df["dominant_language"] == l1]
     n   = len(sub)
     if n == 0: continue
     lv  = sub["level_of_rus"].value_counts()
     dom, dom_p = lv.index[0], lv.iloc[0] / n
-    biased = " >70% one level of competence" if dom_p > 0.70 else ""
+    biased = " >70% one level" if dom_p > 0.70 else ""
     print(f"  {l1:12s}  n={n:4d}  dominant={dom} ({dom_p:.0%}){biased}")
-
-
-# visualisations for the essay
-
-def save(fig, name):
-    fig.savefig(name, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved: {name}")
-
-
-# level composition per L1, coloured by typology
-
-pivot = (
-    df.groupby(["dominant_language", "level_of_rus"], observed=True)
-      .size()
-      .unstack(fill_value=0)
-      .reindex(
-          index=L1_ORDER,
-          columns=[l for l in level_of_rus if l in df["level_of_rus"].unique()]
-      )
-)
-
-fig, ax = plt.subplots(figsize=(max(12, len(L1_ORDER) * 0.8), 6))
-
-level_cols = [l for l in level_of_rus if l in pivot.columns]
-level_cmap = plt.cm.YlOrRd(np.linspace(0.2, 0.9, len(level_cols)))
-
-bottom = np.zeros(len(L1_ORDER))
-
-# stacked bars
-for i, lvl in enumerate(level_cols):
-    vals = pivot[lvl].values.astype(float)
-
-    ax.bar(
-        range(len(L1_ORDER)),
-        vals,
-        bottom=bottom,
-        color=level_cmap[i],
-        label=lvl,
-        edgecolor="white",
-        linewidth=0.4,
-    )
-
-    # add labels inside bars
-    for j, (v, b) in enumerate(zip(vals, bottom)):
-        if v > 4:
-            ax.text(
-                j,
-                b + v / 2,
-                str(int(v)),
-                ha="center",
-                va="center",
-                fontsize=7,
-                color="white",
-                fontweight="bold",
-            )
-
-    bottom += vals
-
-# x-axis labels
-ax.set_xticks(range(len(L1_ORDER)))
-ax.set_xticklabels(L1_ORDER, rotation=40, ha="right")
-
-# colour labels by typology
-for tick, l1 in zip(ax.get_xticklabels(), L1_ORDER):
-    tick.set_color(l1_color(l1))
-
-# legend patches
-level_patches = [
-    mpatches.Patch(color=level_cmap[i], label=lvl)
-    for i, lvl in enumerate(level_cols)
-]
-
-typo_patches = [
-    mpatches.Patch(color=color, label=typology)
-    for typology, color in typ_colors.items()
-    if typology in df["typology"].unique()
-]
-
-# first legend: proficiency level
-legend1 = ax.legend(
-    handles=level_patches,
-    title="Proficiency level",
-    loc="upper left",
-    bbox_to_anchor=(1.02, 1.00),
-    frameon=True,
-)
-
-# second legend: typological group
-legend2 = ax.legend(
-    handles=typo_patches,
-    title="Typological group",
-    loc="upper left",
-    bbox_to_anchor=(1.02, 0.45),
-    frameon=True,
-)
-
-# keep both legends
-ax.add_artist(legend1)
-
-# titles and labels
-ax.set_title(
-    "Level composition per L1 group\n"
-    "(x-axis label colour = typological family)"
-)
-ax.set_xlabel("L1")
-ax.set_ylabel("Number of texts")
-
-# reserve space for legends
-plt.subplots_adjust(right=0.75)
-
-save(fig, "eda_l1_level_stacked.png")
-
-
-# word count violin by L1, grouped by typology
-fig, ax = plt.subplots(figsize=(max(12, len(L1_ORDER) * 0.75), 5))
-# clip outliers for display
-cap = df["word_count"].quantile(0.97)
-plot_df = df[df["word_count"] <= cap]
-
-positions = range(len(L1_ORDER))
-parts = ax.violinplot(
-    [plot_df[plot_df["dominant_language"] == l1]["word_count"].values
-     for l1 in L1_ORDER],
-    positions=positions, showmedians=True, showextrema=False,
-)
-for i, (pc, l1) in enumerate(zip(parts["bodies"], L1_ORDER)):
-    pc.set_facecolor(l1_color(l1))
-    pc.set_alpha(0.65)
-parts["cmedians"].set_color("black")
-parts["cmedians"].set_linewidth(2)
-
-for i, l1 in enumerate(L1_ORDER):
-    y = plot_df[plot_df["dominant_language"] == l1]["word_count"].values
-    x = np.random.default_rng(i).normal(i, 0.07, len(y))
-    ax.scatter(x, y, s=10, alpha=0.35, color=l1_color(l1), zorder=3)
-
-# typology group separators
-typo_seq = [typology_robust.get(l1, "Other") for l1 in L1_ORDER]
-for i in range(1, len(typo_seq)):
-    if typo_seq[i] != typo_seq[i-1]:
-        ax.axvline(i - 0.5, color="black", linewidth=0.8,
-                   linestyle=":", alpha=0.5)
-
-ax.set_xticks(positions)
-ax.set_xticklabels(L1_ORDER, rotation=40, ha="right")
-for tick, l1 in zip(ax.get_xticklabels(), L1_ORDER):
-    tick.set_color(l1_color(l1))
-
-ax.set_ylabel("Word count")
-ax.set_title(f"Text length distribution by L1\n(capped at 97th percentile = {cap:.0f} words; colour = typological family)")
-
-
-# typology legend
-ax.legend(handles=[mpatches.Patch(color=c, label=t)
-                   for t, c in typ_colors.items()
-                   if t in df["typology"].unique()],
-          title="Typological group",
-          bbox_to_anchor=(1.01, 1), loc="upper left")
-plt.tight_layout()
-save(fig, "eda_wordcount_violin.png")
-
-# word count by level — violin
-present_levels = [l for l in level_of_rus if l in df["level_of_rus"].unique()]
-level_palette  = plt.cm.YlOrRd(np.linspace(0.2, 0.9, len(present_levels)))
-
-fig, ax = plt.subplots(figsize=(8, 5))
-parts = ax.violinplot(
-    [df[df["level_of_rus"] == lvl]["word_count"].values for lvl in present_levels],
-    positions=range(len(present_levels)),
-    showmedians=True, showextrema=False,
-)
-for i, pc in enumerate(parts["bodies"]):
-    pc.set_facecolor(level_palette[i])
-    pc.set_alpha(0.7)
-parts["cmedians"].set_color("black")
-parts["cmedians"].set_linewidth(2)
-for i, lvl in enumerate(present_levels):
-    y = df[df["level_of_rus"] == lvl]["word_count"].values
-    x = np.random.default_rng(i+42).normal(i, 0.07, len(y))
-    ax.scatter(x, y, s=10, alpha=0.35, color=level_palette[i], zorder=3)
-
-ax.set_xticks(range(len(present_levels)))
-ax.set_xticklabels(present_levels)
-ax.set_ylabel("Word count")
-ax.set_title("Text length by proficiency level")
-plt.tight_layout()
-save(fig, "eda_wordcount_by_level.png")
-
-
-# feature correlation heatmap
-feat_cols   = ["word_count", "ttr", "avg_word_len", "avg_sent_len", "sent_count"]
-feat_labels = ["Word\ncount", "TTR", "Word\nlength", "Sent.\nlength", "Sent.\ncount"]
-corr = df[feat_cols].corr(method="spearman")
-mask = np.triu(np.ones_like(corr, dtype=bool), k=1)
-
-fig, ax = plt.subplots(figsize=(7, 6))
-sns.heatmap(corr, annot=True, fmt=".2f", cmap="RdBu_r",
-            vmin=-1, vmax=1, center=0,
-            xticklabels=feat_labels, yticklabels=feat_labels,
-            ax=ax, linewidths=0.5, mask=mask,
-            cbar_kws={"label": "Spearman ρ"})
-ax.set_title("Spearman correlations between text features")
-plt.tight_layout()
-save(fig, "eda_feature_correlation.png")
-
-# Heritage detail — level distribution per L1
-her = df[df["background"] == "Heritage"]
-her_l1s = her["dominant_language"].value_counts()
-her_l1s = her_l1s[her_l1s >= 5].index.tolist()  # only L1 with ≥5 heritage texts
-
-if her_l1s:
-    her_pivot = (her.groupby(["dominant_language", "level_of_rus"], observed=True)
-                    .size().unstack(fill_value=0)
-                    .reindex(her_l1s))
-
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-
-    # left: stacked bar
-    bot = np.zeros(len(her_l1s))
-    for i, lvl in enumerate([l for l in present_levels if l in her_pivot.columns]):
-        vals = her_pivot[lvl].values.astype(float)
-        axes[0].bar(range(len(her_l1s)), vals, bottom=bot,
-                    color=level_cmap[i], label=lvl, edgecolor="white")
-        for j, (v, b) in enumerate(zip(vals, bot)):
-            if v > 0:
-                axes[0].text(j, b + v/2, str(int(v)),
-                             ha="center", va="center", fontsize=8,
-                             color="white", fontweight="bold")
-        bot += vals
-    axes[0].set_xticks(range(len(her_l1s)))
-    axes[0].set_xticklabels(her_l1s, rotation=30, ha="right")
-    axes[0].set_title("Heritage speakers: level distribution\n(L1 groups with ≥5 Heritage texts)")
-    axes[0].set_ylabel("Number of texts")
-    axes[0].legend(title="Level", bbox_to_anchor=(1.01, 1), loc="upper left")
-
-    # right: Heritage vs L2 word count comparison (boxplot)
-    l2_df  = df[df["background"] == "L2"]
-    her_df = df[df["background"] == "Heritage"]
-    common_l1 = [l for l in her_l1s if l in l2_df["dominant_language"].unique()]
-
-    x_pos = np.arange(len(common_l1))
-    w = 0.35
-    for offset, sub, label, color in [
-        (-w/2, l2_df,  "L2",       "#4e79a7"),
-        ( w/2, her_df, "Heritage", "#e15759"),
-    ]:
-        vals = [sub[sub["dominant_language"] == l]["word_count"].values
-                for l in common_l1]
-        bp = axes[1].boxplot(
-            [v if len(v) > 0 else [np.nan] for v in vals],
-            positions=x_pos + offset, widths=w * 0.85,
-            patch_artist=True,
-            medianprops={"color": "black", "linewidth": 2},
-            boxprops={"facecolor": color, "alpha": 0.7},
-            whiskerprops={"color": color}, capprops={"color": color},
-            flierprops={"marker": "o", "markersize": 3,
-                        "markerfacecolor": color, "alpha": 0.4},
-        )
-    axes[1].set_xticks(x_pos)
-    axes[1].set_xticklabels(common_l1, rotation=30, ha="right")
-    axes[1].set_title("Text length: L2 vs Heritage\n(shared L1 groups)")
-    axes[1].set_ylabel("Word count")
-    axes[1].legend(handles=[
-        mpatches.Patch(color="#4e79a7", alpha=0.7, label="L2"),
-        mpatches.Patch(color="#e15759", alpha=0.7, label="Heritage"),
-    ], title="Background")
-
-    plt.tight_layout()
-    save(fig, "eda_heritage_detail.png")
-
-# scatter word_count vs TTR coloured by typology
-fig, axes = plt.subplots(1, 2, figsize=(13, 5))
-
-for ax, level_filter, title in [
-    (axes[0], None,                "All proficiency levels"),
-    (axes[1], ["A1", "A2", "B1"], "Beginner–Intermediate (A1–B1)"),
-]:
-    sub = df if level_filter is None else df[df["level_of_rus"].isin(level_filter)]
-    for typo, color in typ_colors.items():
-        s = sub[sub["typology"] == typo]
-        if s.empty: continue
-        ax.scatter(s["word_count"], s["ttr"], label=typo,
-                   color=color, s=25, alpha=0.55, edgecolors="none")
-
-    x, y = sub["word_count"].values, sub["ttr"].values
-    mask  = np.isfinite(x) & np.isfinite(y)
-    if mask.sum() > 2:
-        z = np.polyfit(x[mask], y[mask], 1)
-        xl = np.linspace(x[mask].min(), x[mask].max(), 100)
-        r  = np.corrcoef(x[mask], y[mask])[0, 1]
-        ax.plot(xl, np.poly1d(z)(xl), "k--", linewidth=1.2, alpha=0.5,
-                label=f"trend (r={r:.2f})")
-
-    ax.set_xlabel("Text length (words)")
-    ax.set_ylabel("TTR")
-    ax.set_title(title)
-    ax.legend(title="Typology", fontsize=8)
-
-plt.suptitle("Lexical diversity vs text length by typological group",
-             fontweight="bold", y=1.01)
-plt.tight_layout()
-save(fig, "eda_ttr_vs_length_scatter.png")
